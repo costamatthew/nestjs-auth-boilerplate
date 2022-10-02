@@ -1,13 +1,15 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 
 import { PrismaService } from 'prisma/prisma.service';
+import { jwtSecret } from 'src/utils/constants';
 
 import { AuthDto } from './dto/auth.dto';
 
 @Injectable()
 export class AuthService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private jwt: JwtService) {}
 
   async signup(dto: AuthDto) {
     const { email, password } = dto;
@@ -29,8 +31,30 @@ export class AuthService {
     return { message: 'signup was succefull', status: 201 };
   }
 
-  async signin() {
-    return { message: 'TEST' };
+  async signin(dto: AuthDto) {
+    const { email, password } = dto;
+
+    const foundUser = await this.prisma.user.findUnique({ where: { email } });
+
+    if (!foundUser) {
+      throw new BadRequestException('Wrong creadentials');
+    }
+
+    const isMatch = await this.comparePassword({
+      password,
+      hash: foundUser.hashedPassword,
+    });
+
+    if (!isMatch) {
+      throw new BadRequestException('Wrong creadentials');
+    }
+
+    const token = await this.signToken({
+      id: foundUser.id,
+      email: foundUser.email,
+    });
+
+    return { token, status: 200 };
   }
 
   async signout() {
@@ -39,8 +63,17 @@ export class AuthService {
 
   async hashPassword(password: string) {
     const salrOrRounds = 10;
-    const hashedPassword = await bcrypt.hash(password, salrOrRounds);
 
-    return hashedPassword;
+    return await bcrypt.hash(password, salrOrRounds);
+  }
+
+  async comparePassword(args: { password: string; hash: string }) {
+    return await bcrypt.compare(args.password, args.hash);
+  }
+
+  async signToken(args: { id: string; email: string }) {
+    const payload = args;
+
+    return await this.jwt.signAsync(payload, { secret: jwtSecret });
   }
 }
